@@ -26,11 +26,11 @@ export class AccountRepository extends Repository {
     if (!this.client.state.passwordEncryptionPubKey) {
       await this.client.qe.syncLoginExperiments();
     }
-    const { encrypted, time } = this.encryptPassword(password);
+    const {encrypted, time} = this.encryptPassword(password);
     const response = await Bluebird.try(() =>
       this.client.request.send<AccountRepositoryLoginResponseRootObject>({
         method: 'POST',
-        url: '/api/v1/web/accounts/login/ajax/',
+        url: '/api/v1/accounts/login/',
         form: this.client.request.sign({
           username,
           enc_password: `#PWD_INSTAGRAM:4:${time}:${encrypted}`,
@@ -76,17 +76,14 @@ export class AccountRepository extends Repository {
     return `2${sum}`;
   }
 
-  public encryptPassword(password: string): { time: string; encrypted: string } {
+  public encryptPassword(password: string): { time: string, encrypted: string } {
     const randKey = crypto.randomBytes(32);
     const iv = crypto.randomBytes(12);
-    const rsaEncrypted = crypto.publicEncrypt(
-      {
-        key: Buffer.from(this.client.state.passwordEncryptionPubKey, 'base64').toString(),
-        // @ts-ignore
-        padding: crypto.constants.RSA_PKCS1_PADDING,
-      },
-      randKey,
-    );
+    const rsaEncrypted = crypto.publicEncrypt({
+      key: Buffer.from(this.client.state.passwordEncryptionPubKey, 'base64').toString(),
+      // @ts-ignore
+      padding: crypto.constants.RSA_PKCS1_PADDING,
+    }, randKey);
     const cipher = crypto.createCipheriv('aes-256-gcm', randKey, iv);
     const time = Math.floor(Date.now() / 1000).toString();
     cipher.setAAD(Buffer.from(time));
@@ -100,10 +97,8 @@ export class AccountRepository extends Repository {
         Buffer.from([1, this.client.state.passwordEncryptionKeyId]),
         iv,
         sizeBuffer,
-        rsaEncrypted,
-        authTag,
-        aesEncrypted,
-      ]).toString('base64'),
+        rsaEncrypted, authTag, aesEncrypted])
+        .toString('base64'),
     };
   }
 
@@ -114,15 +109,17 @@ export class AccountRepository extends Repository {
       trustThisDevice: '1',
       verificationMethod: '1',
     });
-    const { body } = await this.client.request.send({
-      url: '/api/v1/web/accounts/login/ajax/two_factor/',
+    const { body } = await this.client.request.send<AccountRepositoryLoginResponseLogged_in_user>({
+      url: '/api/v1/accounts/two_factor_login/',
       method: 'POST',
       form: this.client.request.sign({
+        verification_code: options.verificationCode,
         _csrftoken: this.client.state.cookieCsrfToken,
-        identifier: options.twoFactorIdentifier,
-        verificationCode: options.verificationCode,
+        two_factor_identifier: options.twoFactorIdentifier,
         username: options.username,
-        trust_signal: options.trustThisDevice === '1' ? 'true' : 'false',
+        trust_this_device: options.trustThisDevice,
+        guid: this.client.state.uuid,
+        device_id: this.client.state.deviceId,
         verification_method: options.verificationMethod,
       }),
     });
